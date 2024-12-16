@@ -10,6 +10,19 @@ This repo is the official `Pytorch` implementation of the paper:
 
 [Paper](https://aclanthology.org/2023.acl-long.811/) | [Arxiv](https://arxiv.org/abs/2306.00103) | [Model](https://huggingface.co/LooperXX/ManagerTower) | [Slides](http://looperxx.github.io/files/ManagerTower-ACL23-PPT-2023-06-EN-12min.pdf) | [Video(EN)](https://youtu.be/SOHprfiiClQ) | [Video(CN)](https://www.bilibili.com/video/BV17s4y1y7Ny) | [Blog(CN)](http://looperxx.github.io/blog/ManagerTower) | [Tweet(EN)](https://twitter.com/looperxx27/status/1678341890809401346)
 
+---
+
+[Update] We extend the Manager in the latest MLLM architecture in the following paper:
+
+**Manager: Aggregating Insights from Unimodal Experts in Two-Tower VLMs and MLLMs**
+
+[Xiao Xu](https://looperxx.github.io/), [Libo Qin](https://faculty.csu.edu.cn/qinlibo/), [Wanxiang Che](http://ir.hit.edu.cn/~car/), [Min-Yen Kan](https://www.comp.nus.edu.sg/~kanmy).
+
+Under Review.
+
+[Paper](https://looperxx.github.io/files/Manager.pdf) | [Code](https://github.com/LooperXX/LLaVA-OV-Manager) | [Model](https://huggingface.co/LooperXX/ManagerTower)
+
+
 ## Abstract
 
 Two-Tower Vision-Language (VL) models have shown promising improvements on various downstream VL tasks. Although the most advanced work improves performance by building bridges between encoders, it suffers from ineffective layer-by-layer utilization of uni-modal representations and cannot flexibly exploit different levels of uni-modal semantic knowledge. In this work, we propose ManagerTower, a novel VL model architecture that gathers and combines the insights of pre-trained uni-modal experts at different levels. The managers introduced in each cross-modal layer can adaptively aggregate uni-modal semantic knowledge to facilitate more comprehensive cross-modal alignment and fusion. ManagerTower outperforms previous strong baselines both with and without Vision-Language Pre-training (VLP). With only 4M VLP data, ManagerTower achieves superior performances on various downstream VL tasks, especially 79.15% accuracy on VQAv2 Test-Std, 86.56% IR@1 and 95.64% TR@1 on Flickr30K. Code and checkpoints are available at https://github.com/LooperXX/ManagerTower.
