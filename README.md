@@ -12,15 +12,16 @@ This repo is the official `Pytorch` implementation of the paper:
 
 ---
 
-[Update] We extend the Manager in the latest MLLM architecture in the following paper:
-
-**Manager: Aggregating Insights from Unimodal Experts in Two-Tower VLMs and MLLMs**
-
-[Xiao Xu](https://looperxx.github.io/), [Libo Qin](https://faculty.csu.edu.cn/qinlibo/), [Wanxiang Che](http://ir.hit.edu.cn/~car/), [Min-Yen Kan](https://www.comp.nus.edu.sg/~kanmy).
-
-Under Review.
-
-[Paper](https://looperxx.github.io/files/Manager.pdf) | [Code](https://github.com/LooperXX/LLaVA-OV-Manager) | [Model](https://huggingface.co/LooperXX/ManagerTower)
+> [!NOTE]
+> [Update] We extend the Manager in the latest MLLM architecture in the following paper:
+> 
+> **Manager: Aggregating Insights from Unimodal Experts in Two-Tower VLMs and MLLMs**
+> 
+> [Xiao Xu](https://looperxx.github.io/), [Libo Qin](https://faculty.csu.edu.cn/qinlibo/), [Wanxiang Che](http://ir.hit.edu.cn/~car/), [Min-Yen Kan](https://www.comp.nus.edu.sg/~kanmy).
+> 
+> Under Review.
+> 
+> [Paper](https://looperxx.github.io/files/Manager.pdf) | [Code](https://github.com/LooperXX/LLaVA-OV-Manager) | [Model](https://huggingface.co/LooperXX/LLaVA-OV-Manager)
 
 
 ## Abstract
