@@ -13,7 +13,7 @@ import json
 random.seed(0) # Make dataset splits repeatable
 
 # The root directory which holds all information of the dataset.
-dataDir = '~/MT/dataset/vg'
+dataDir = f'{os.getenv("HOME")}/MT/dataset/vg'
 
 # First determine train, val, test splits (x, 5000, 5000)
 train = set()

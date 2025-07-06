@@ -107,4 +107,4 @@ def make_arrow(root, dataset_root):
                 writer.write_table(table)
 
 # https://lil.nlp.cornell.edu/resources/NLVR2/
-make_arrow('~/MT/dataset/nlvr', '~/MT/dataset/fine-tune')
+make_arrow(f'{os.getenv("HOME")}/MT/dataset/nlvr', f'{os.getenv("HOME")}/MT/dataset/fine-tune')

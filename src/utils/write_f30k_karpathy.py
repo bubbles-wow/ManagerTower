@@ -66,4 +66,4 @@ def make_arrow(root, dataset_root):
             with pa.RecordBatchFileWriter(sink, table.schema) as writer:
                 writer.write_table(table)
 
-make_arrow('~/MT/dataset/mscoco_flickr30k_vqav2_snli_ve', '~/MT/dataset/fine-tune')
+make_arrow(f'{os.getenv("HOME")}/MT/dataset/mscoco_flickr30k_vqav2_snli_ve', f'{os.getenv("HOME")}/MT/dataset/fine-tune')

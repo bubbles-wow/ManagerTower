@@ -23,7 +23,7 @@ python3.8 -m venv venv_ManagerTower
 
 ## git clone
 cd ~/MT
-git clone https://github.com/LooperXX/ManagerTower.git
+git clone https://github.com/bubbles-wow/ManagerTower.git
 cd BridgeTower
 
 ## dependency
@@ -31,7 +31,7 @@ source ~/MT/venv_ManagerTower/bin/activate
 pip install --upgrade pip
 pip install torch==1.11.0+cu113 torchvision==0.12.0+cu113 torchaudio==0.11.0+cu113 -f https://download.pytorch.org/whl/cu113/torch_stable.html
 pip install -r requirements.txt
-pip install evalai
+# pip install evalai
 pip install --upgrade requests click python-dateutil
 
 ## mkdir
@@ -40,7 +40,7 @@ sudo mkdir -p ~/MT/dataset/
 sudo mkdir -p ~/MT/best_checkpoints/
 sudo mkdir -p ~/MT/checkpoints/
 sudo mkdir -p ~/MT/logs/
-sudo chmod -R 777 ~/MT
+# sudo chmod -R 777 ~/MT
 
 ## download data and checkpoints, and put them in ~/MT/dataset/ and ~/MT/best_checkpoints/
 ## the final file structure of ~/MT/dataset/ should be like this:

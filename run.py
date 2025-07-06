@@ -70,7 +70,8 @@ def main(_config):
         gpus=_config["num_gpus"],
         num_nodes=_config["num_nodes"],
         precision=_config["precision"],
-        strategy="ddp",
+        # for single node
+        # strategy="ddp",
         benchmark=True,
         deterministic=True,
         max_epochs=_config["max_epoch"] if max_steps == -1 else 1000,
@@ -85,6 +86,8 @@ def main(_config):
         val_check_interval=_config["val_check_interval"],
         prepare_data_per_node=False,
         replace_sampler_ddp=False,
+        # for debug
+        # limit_test_batches=100
     )
 
     if not _config["test_only"]:

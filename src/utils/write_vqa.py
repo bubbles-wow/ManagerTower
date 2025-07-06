@@ -226,5 +226,5 @@ def make_arrow(root, dataset_root, fix_answer_normalization=True):
         with pa.RecordBatchFileWriter(sink, df2.schema) as writer:
             writer.write_table(df2)
 
-make_arrow('~/MT/dataset/mscoco_flickr30k_vqav2_snli_ve', '~/MT/dataset/fine-tune', True)
-make_arrow('~/MT/dataset/mscoco_flickr30k_vqav2_snli_ve', '~/MT/dataset/fine-tune', False)
+make_arrow(f'{os.getenv("HOME")}/MT/dataset/mscoco_flickr30k_vqav2_snli_ve', f'{os.getenv("HOME")}/MT/dataset/fine-tune', True)
+make_arrow(f'{os.getenv("HOME")}/MT/dataset/mscoco_flickr30k_vqav2_snli_ve', f'{os.getenv("HOME")}/MT/dataset/fine-tune', False)

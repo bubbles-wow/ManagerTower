@@ -71,4 +71,4 @@ def make_arrow(root, dataset_root):
         with pa.RecordBatchFileWriter(sink, table.schema) as writer:
             writer.write_table(table)
 
-make_arrow('~/MT/dataset/vg', '~/MT/dataset/pre-train')
+make_arrow(f'{os.getenv("HOME")}/MT/dataset/vg', f'{os.getenv("HOME")}/MT/dataset/pre-train')

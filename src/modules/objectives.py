@@ -44,8 +44,10 @@ def compute_mlm(pl_module, batch, split):
     acc = getattr(pl_module, f"{split}_{loss_name}_accuracy")(
         ret["mlm_logits"], ret["mlm_labels"]
     )
-    pl_module.log(f"{split}/{loss_name}/loss", loss)
-    pl_module.log(f"{split}/{loss_name}/accuracy", acc)
+    
+    real_batch_size = batch["image"][0].size(0)
+    pl_module.log(f"{split}/{loss_name}/loss", loss, batch_size=real_batch_size)
+    pl_module.log(f"{split}/{loss_name}/accuracy", acc, batch_size=real_batch_size)
 
     return ret
 
@@ -87,14 +89,16 @@ def compute_itm(pl_module, batch, split):
     acc = getattr(pl_module, f"{split}_{loss_name}_accuracy")(
         ret["itm_logits"], ret["itm_labels"]
     )
-    pl_module.log(f"{split}/{loss_name}/loss", loss)
-    pl_module.log(f"{split}/{loss_name}/accuracy", acc)
+    
+    real_batch_size = batch["image"][0].size(0)
+    pl_module.log(f"{split}/{loss_name}/loss", loss, batch_size=real_batch_size)
+    pl_module.log(f"{split}/{loss_name}/accuracy", acc, batch_size=real_batch_size)
 
     return ret
 
 def compute_itc(pl_module, batch, split):
     assert batch["image"][0].size(0) == len(batch["text"])
-    bs, rank = len(batch["text"]), torch.distributed.get_rank()
+    bs, rank = len(batch["text"]), torch.distributed.get_rank() if torch.distributed.is_initialized() else 0
     
     with torch.no_grad():
         pl_module.temperature.clamp_(0.001, 0.5)
@@ -103,11 +107,25 @@ def compute_itc(pl_module, batch, split):
     unimodal_feats_text = infer['unimodal_feats_text']
     unimodal_feats_image = infer['unimodal_feats_image']
 
-    gather_unimodal_feats_text = pl_module.all_gather(unimodal_feats_text, sync_grads=True)
-    gather_unimodal_feats_image = pl_module.all_gather(unimodal_feats_image, sync_grads=True)
+    # gather_unimodal_feats_text = pl_module.all_gather(unimodal_feats_text, sync_grads=True)
+    # gather_unimodal_feats_image = pl_module.all_gather(unimodal_feats_image, sync_grads=True)
     
-    gather_unimodal_feats_text = gather_unimodal_feats_text.view((-1,) + (gather_unimodal_feats_text.shape)[2:])
-    gather_unimodal_feats_image = gather_unimodal_feats_image.view((-1,) + (gather_unimodal_feats_image.shape)[2:])
+    # gather_unimodal_feats_text = gather_unimodal_feats_text.view((-1,) + (gather_unimodal_feats_text.shape)[2:])
+    # gather_unimodal_feats_image = gather_unimodal_feats_image.view((-1,) + (gather_unimodal_feats_image.shape)[2:])
+
+    # --- 核心修改在这里 ---
+    if torch.distributed.is_initialized():
+        # 分布式模式下的逻辑
+        gather_unimodal_feats_text = pl_module.all_gather(unimodal_feats_text, sync_grads=True)
+        gather_unimodal_feats_image = pl_module.all_gather(unimodal_feats_image, sync_grads=True)
+
+        gather_unimodal_feats_text = gather_unimodal_feats_text.view((-1,) + (gather_unimodal_feats_text.shape)[2:])
+        gather_unimodal_feats_image = gather_unimodal_feats_image.view((-1,) + (gather_unimodal_feats_image.shape)[2:])
+    else:
+        # 单卡模式下的逻辑
+        gather_unimodal_feats_text = unimodal_feats_text
+        gather_unimodal_feats_image = unimodal_feats_image
+    # --- 修改结束 ---
     
     logit_scale = torch.log(1 / pl_module.temperature).exp()
     itc_logits_i2t = logit_scale * unimodal_feats_image @ gather_unimodal_feats_text.t()
@@ -128,15 +146,16 @@ def compute_itc(pl_module, batch, split):
     if pl_module.hparams.config["num_layers"] == 0:
         loss_name = 'irtr_itm'
 
+    real_batch_size = batch["image"][0].size(0)
     loss = getattr(pl_module, f"{split}_{loss_name}_loss")(ret["itc_loss"])
-    pl_module.log(f"{split}/{loss_name}/loss", loss)
+    pl_module.log(f"{split}/{loss_name}/loss", loss, batch_size=real_batch_size)
 
     return ret
 
 def compute_itm_itc(pl_module, batch, split, pretrain=False):
     # REMEMBER: No need to draw false images for image text matching in data preprocessing.
     assert batch["image"][0].size(0) == len(batch["text"])
-    bs, rank = len(batch["text"]), torch.distributed.get_rank()
+    bs, rank = len(batch["text"]), torch.distributed.get_rank() if torch.distributed.is_initialized() else 0
     
     # forward the positive image-text pair
     with torch.no_grad():
@@ -146,11 +165,26 @@ def compute_itm_itc(pl_module, batch, split, pretrain=False):
     unimodal_feats_text = infer['unimodal_feats_text']
     unimodal_feats_image = infer['unimodal_feats_image']
 
-    gather_unimodal_feats_text = pl_module.all_gather(unimodal_feats_text, sync_grads=True)
-    gather_unimodal_feats_image = pl_module.all_gather(unimodal_feats_image, sync_grads=True)
+    # gather_unimodal_feats_text = pl_module.all_gather(unimodal_feats_text, sync_grads=True)
+    # gather_unimodal_feats_image = pl_module.all_gather(unimodal_feats_image, sync_grads=True)
 
-    gather_unimodal_feats_text = gather_unimodal_feats_text.view((-1,) + (gather_unimodal_feats_text.shape)[2:])
-    gather_unimodal_feats_image = gather_unimodal_feats_image.view((-1,) + (gather_unimodal_feats_image.shape)[2:])
+    # gather_unimodal_feats_text = gather_unimodal_feats_text.view((-1,) + (gather_unimodal_feats_text.shape)[2:])
+    # gather_unimodal_feats_image = gather_unimodal_feats_image.view((-1,) + (gather_unimodal_feats_image.shape)[2:])
+
+    
+    # --- 核心修改在这里 ---
+    if torch.distributed.is_initialized():
+        # 分布式模式下的逻辑
+        gather_unimodal_feats_text = pl_module.all_gather(unimodal_feats_text, sync_grads=True)
+        gather_unimodal_feats_image = pl_module.all_gather(unimodal_feats_image, sync_grads=True)
+
+        gather_unimodal_feats_text = gather_unimodal_feats_text.view((-1,) + (gather_unimodal_feats_text.shape)[2:])
+        gather_unimodal_feats_image = gather_unimodal_feats_image.view((-1,) + (gather_unimodal_feats_image.shape)[2:])
+    else:
+        # 单卡模式下的逻辑
+        gather_unimodal_feats_text = unimodal_feats_text
+        gather_unimodal_feats_image = unimodal_feats_image
+    # --- 修改结束 ---
     
     logit_scale = torch.log(1 / pl_module.temperature).exp()
     itc_logits_i2t = logit_scale * unimodal_feats_image @ gather_unimodal_feats_text.t()
@@ -178,8 +212,9 @@ def compute_itm_itc(pl_module, batch, split, pretrain=False):
     else:
         loss_name = 'irtr_itc'
     
+    real_batch_size = batch["image"][0].size(0)
     loss = getattr(pl_module, f"{split}_{loss_name}_loss")(itc_loss)
-    pl_module.log(f"{split}/{loss_name}/loss", loss)
+    pl_module.log(f"{split}/{loss_name}/loss", loss, batch_size=real_batch_size)
 
     # sample hard negative images for image text matching from image text contrastive logits
     if pl_module.hparams.config["gather_global_negative"]:
@@ -347,14 +382,15 @@ def compute_itm_itc(pl_module, batch, split, pretrain=False):
     acc = getattr(pl_module, f"{split}_{loss_name}_accuracy")(
         ret["itm_logits"], ret["itm_labels"]
     )
-    pl_module.log(f"{split}/{loss_name}/loss", loss)
-    pl_module.log(f"{split}/{loss_name}/accuracy", acc)
+    
+    pl_module.log(f"{split}/{loss_name}/loss", loss, batch_size=real_batch_size)
+    pl_module.log(f"{split}/{loss_name}/accuracy", acc, batch_size=real_batch_size)
     return ret
 
 def compute_itm_itc_meter(pl_module, batch, split, pretrain=False):
     # REMEMBER: No need to draw false images for image text matching in data preprocessing.
     assert batch["image"][0].size(0) == len(batch["text"])
-    bs, rank = len(batch["text"]), torch.distributed.get_rank()
+    bs, rank = len(batch["text"]), torch.distributed.get_rank() if torch.distributed.is_initialized() else 0
     
     # forward the positive image-text pair
     with torch.no_grad():
@@ -364,11 +400,25 @@ def compute_itm_itc_meter(pl_module, batch, split, pretrain=False):
     unimodal_feats_text = infer['unimodal_feats_text']
     unimodal_feats_image = infer['unimodal_feats_image']
     
-    gather_unimodal_feats_text = pl_module.all_gather(unimodal_feats_text, sync_grads=True)
-    gather_unimodal_feats_image = pl_module.all_gather(unimodal_feats_image, sync_grads=True)
+    # gather_unimodal_feats_text = pl_module.all_gather(unimodal_feats_text, sync_grads=True)
+    # gather_unimodal_feats_image = pl_module.all_gather(unimodal_feats_image, sync_grads=True)
    
-    gather_unimodal_feats_text = gather_unimodal_feats_text.view((-1,) + (gather_unimodal_feats_text.shape)[2:])
-    gather_unimodal_feats_image = gather_unimodal_feats_image.view((-1,) + (gather_unimodal_feats_image.shape)[2:])
+    # gather_unimodal_feats_text = gather_unimodal_feats_text.view((-1,) + (gather_unimodal_feats_text.shape)[2:])
+    # gather_unimodal_feats_image = gather_unimodal_feats_image.view((-1,) + (gather_unimodal_feats_image.shape)[2:])
+    
+    # --- 核心修改在这里 ---
+    if torch.distributed.is_initialized():
+        # 分布式模式下的逻辑
+        gather_unimodal_feats_text = pl_module.all_gather(unimodal_feats_text, sync_grads=True)
+        gather_unimodal_feats_image = pl_module.all_gather(unimodal_feats_image, sync_grads=True)
+
+        gather_unimodal_feats_text = gather_unimodal_feats_text.view((-1,) + (gather_unimodal_feats_text.shape)[2:])
+        gather_unimodal_feats_image = gather_unimodal_feats_image.view((-1,) + (gather_unimodal_feats_image.shape)[2:])
+    else:
+        # 单卡模式下的逻辑
+        gather_unimodal_feats_text = unimodal_feats_text
+        gather_unimodal_feats_image = unimodal_feats_image
+    # --- 修改结束 ---
     
     logit_scale = torch.log(1 / pl_module.temperature).exp()
     itc_logits_i2t = logit_scale * unimodal_feats_image @ gather_unimodal_feats_text.t()
@@ -396,8 +446,9 @@ def compute_itm_itc_meter(pl_module, batch, split, pretrain=False):
     else:
         loss_name = 'irtr_itc'
     
+    real_batch_size = batch["image"][0].size(0)
     loss = getattr(pl_module, f"{split}_{loss_name}_loss")(itc_loss)
-    pl_module.log(f"{split}/{loss_name}/loss", loss)
+    pl_module.log(f"{split}/{loss_name}/loss", loss, batch_size=real_batch_size)
 
     # sample hard negative images for image text matching from image text contrastive logits
     if pl_module.hparams.config["gather_global_negative"]:
@@ -539,8 +590,9 @@ def compute_itm_itc_meter(pl_module, batch, split, pretrain=False):
     acc = getattr(pl_module, f"{split}_{loss_name}_accuracy")(
         ret["itm_logits"], ret["itm_labels"]
     )
-    pl_module.log(f"{split}/{loss_name}/loss", loss)
-    pl_module.log(f"{split}/{loss_name}/accuracy", acc)
+    
+    pl_module.log(f"{split}/{loss_name}/loss", loss, batch_size=real_batch_size)
+    pl_module.log(f"{split}/{loss_name}/accuracy", acc, batch_size=real_batch_size)
     return ret
 
 # fine-tune
@@ -560,13 +612,16 @@ def compute_snli(pl_module, batch, split):
 
     loss_name = 'snli'
 
+    real_batch_size = batch["image"][0].size(0)
+
     if split == "train":
         loss = getattr(pl_module, f"{split}_{loss_name}_loss")(ret["snli_loss"])
         acc = getattr(pl_module, f"{split}_{loss_name}_accuracy")(
             ret["snli_logits"], ret["snli_labels"]
         )
-        pl_module.log(f"{split}/{loss_name}/loss", loss)
-        pl_module.log(f"{split}/{loss_name}/accuracy", acc)
+        
+        pl_module.log(f"{split}/{loss_name}/loss", loss, batch_size=real_batch_size)
+        pl_module.log(f"{split}/{loss_name}/accuracy", acc, batch_size=real_batch_size)
     else:
         val_batches = [i for i, n in enumerate(batch["table_name"]) if "dev" in n]
         test_batches = [i for i, n in enumerate(batch["table_name"]) if "test" in n]
@@ -580,8 +635,9 @@ def compute_snli(pl_module, batch, split):
             val_acc = getattr(pl_module, f"val_{loss_name}_accuracy")(
                 ret["snli_logits"][val_batches], ret["snli_labels"][val_batches]
             )
-            pl_module.log(f"val/snli/loss", val_loss)
-            pl_module.log(f"val/snli/accuracy", val_acc)
+
+            pl_module.log(f"val/snli/loss", val_loss, batch_size=real_batch_size)
+            pl_module.log(f"val/snli/accuracy", val_acc, batch_size=real_batch_size)
 
         if test_batches:
             test_loss = getattr(pl_module, f"test_{loss_name}_loss")(
@@ -592,8 +648,9 @@ def compute_snli(pl_module, batch, split):
             test_acc = getattr(pl_module, f"test_{loss_name}_accuracy")(
                 ret["snli_logits"][test_batches], ret["snli_labels"][test_batches]
             )
-            pl_module.log(f"test/snli/loss", test_loss)
-            pl_module.log(f"test/snli/accuracy", test_acc)
+
+            pl_module.log(f"test/snli/loss", test_loss, batch_size=real_batch_size)
+            pl_module.log(f"test/snli/accuracy", test_acc, batch_size=real_batch_size)
 
     return ret
 
@@ -631,8 +688,10 @@ def compute_vqa(pl_module, batch, split):
     score = getattr(pl_module, f"{split}_{loss_name}_score")(
         ret["vqa_logits"], ret["vqa_targets"]
     )
-    pl_module.log(f"{split}/{loss_name}/loss", loss)
-    pl_module.log(f"{split}/{loss_name}/score", score)
+
+    real_batch_size = batch["image"][0].size(0)
+    pl_module.log(f"{split}/{loss_name}/loss", loss, batch_size=real_batch_size)
+    pl_module.log(f"{split}/{loss_name}/score", score, batch_size=real_batch_size)
 
     return ret
 
@@ -736,7 +795,14 @@ def compute_irtr_recall(pl_module, split):
     print("[Evaluation] load irtr dataset for text features caching")
     text_dset = pl_module.trainer.datamodule.dms[0].make_no_false_dset(split)
     text_dset.tokenizer = pl_module.trainer.datamodule.dms[0].tokenizer
-    text_dist_sampler = DistributedSampler(text_dset, shuffle=False)
+    # text_dist_sampler = DistributedSampler(text_dset, shuffle=False)
+    
+    text_dist_sampler = None
+    if torch.distributed.is_initialized():
+        text_dist_sampler = DistributedSampler(text_dset, shuffle=False)
+    else:
+        text_dist_sampler = torch.utils.data.SequentialSampler(text_dset)
+
     text_loader = torch.utils.data.DataLoader(
         text_dset,
         batch_size=pl_module.hparams.config["per_gpu_eval_batchsize_text"],
@@ -752,7 +818,14 @@ def compute_irtr_recall(pl_module, split):
     print("[Evaluation] load irtr dataset for image features caching")
     image_dset = pl_module.trainer.datamodule.dms[0].make_no_false_dset(split, image_only=True)
     image_dset.tokenizer = pl_module.trainer.datamodule.dms[0].tokenizer
-    image_dist_sampler = DistributedSampler(image_dset, shuffle=False)
+    # image_dist_sampler = DistributedSampler(image_dset, shuffle=False)
+
+    image_dist_sampler = None
+    if torch.distributed.is_initialized():
+        image_dist_sampler = DistributedSampler(image_dset, shuffle=False)
+    else:
+        image_dist_sampler = torch.utils.data.SequentialSampler(image_dset)
+
     image_loader = torch.utils.data.DataLoader(
         image_dset,
         batch_size=pl_module.hparams.config["per_gpu_eval_batchsize_image"],
@@ -796,7 +869,7 @@ def compute_irtr_recall(pl_module, split):
         image_embedss = pl_module.infer_image(img=_b["image"][0].to(pl_module.device))
         image_embedss_cache.append(image_embedss)
         iids_cache += _b["img_index"]
-    image_embedss_cache = torch.cat(image_embedss_cache, dim=1)
+    # image_embedss_cache = torch.cat(image_embedss_cache, dim=1)
     
     image_index, rank_scores, rank_iids = 0, list(), list()
     
@@ -806,9 +879,21 @@ def compute_irtr_recall(pl_module, split):
     else:
         text_chunk_num = text_embedss_cache.size(1) // text_chunk_size + 1
 
+    image_batch_size = pl_module.hparams.config["per_gpu_eval_batchsize_image"]
+
     print("[Evaluation] start to compute the irtr recall")
     for _iid in tqdm(iids_cache, desc="rank loop"):
-        image_embedss = image_embedss_cache[:, image_index]
+        # image_embedss = image_embedss_cache[:, image_index]
+
+        # --- 核心修改在这里 ---
+        # 1. 计算当前图像在哪个批次 (batch_idx) 和批次中的哪个位置 (idx_in_batch)
+        batch_idx = image_index // image_batch_size
+        idx_in_batch = image_index % image_batch_size
+
+        # 2. 从列表中先找到对应的批次张量，再从该张量中取出所需的图像特征
+        image_embedss = image_embedss_cache[batch_idx][:, idx_in_batch]
+        # --- 修改结束 ---
+
         image_index += 1
         
         img_batch_score = list()
@@ -881,7 +966,14 @@ def compute_irtr_itm_itc_recall(pl_module, split):
     torch.cuda.empty_cache()
     text_dset = pl_module.trainer.datamodule.dms[0].make_no_false_dset(split)
     text_dset.tokenizer = pl_module.trainer.datamodule.dms[0].tokenizer
-    text_dist_sampler = DistributedSampler(text_dset, shuffle=False)
+    # text_dist_sampler = DistributedSampler(text_dset, shuffle=False)
+
+    text_dist_sampler = None
+    if torch.distributed.is_initialized():
+        text_dist_sampler = DistributedSampler(text_dset, shuffle=False)
+    else:
+        text_dist_sampler = torch.utils.data.SequentialSampler(text_dset)
+
     text_loader = torch.utils.data.DataLoader(
         text_dset,
         batch_size=pl_module.hparams.config["per_gpu_eval_batchsize_text"],
@@ -898,7 +990,14 @@ def compute_irtr_itm_itc_recall(pl_module, split):
     print("[Evaluation] load irtr dataset for image features caching")
     image_dset = pl_module.trainer.datamodule.dms[0].make_no_false_dset(split, image_only=True)
     image_dset.tokenizer = pl_module.trainer.datamodule.dms[0].tokenizer
-    image_dist_sampler = DistributedSampler(image_dset, shuffle=False)
+    # image_dist_sampler = DistributedSampler(image_dset, shuffle=False)
+
+    image_dist_sampler = None
+    if torch.distributed.is_initialized():
+        image_dist_sampler = DistributedSampler(image_dset, shuffle=False)
+    else:
+        image_dist_sampler = torch.utils.data.SequentialSampler(image_dset)
+
     image_loader = torch.utils.data.DataLoader(
         image_dset,
         batch_size=pl_module.hparams.config["per_gpu_eval_batchsize_image"],
@@ -980,7 +1079,10 @@ def compute_irtr_itm_itc_recall(pl_module, split):
                 img_input_cache.append(img_input)
             unimodal_feats_image_cache.append(unimodal_feats_image)
             iids_cache += _b["img_index"]
-    image_embedss_cache = torch.cat(image_embedss_cache, dim=1)
+    # image_embedss_cache = torch.cat(image_embedss_cache, dim=1)
+
+    image_batch_size = pl_module.hparams.config["per_gpu_eval_batchsize_image"]
+
     if pl_module.hparams.config["gather_all_image_inputs"]:
         img_input_cache = torch.cat(img_input_cache, dim=0)
     unimodal_feats_image_cache = torch.cat(unimodal_feats_image_cache, dim=0)
@@ -998,7 +1100,17 @@ def compute_irtr_itm_itc_recall(pl_module, split):
     image_index, rank_scores, rank_iids = 0, list(), list()
     for _iid in tqdm(iids_cache, desc="image-to-text rank loop"):
         topk_idx_i = topk_idx[image_index]
-        image_embedss = image_embedss_cache[:, image_index]
+        # image_embedss = image_embedss_cache[:, image_index]
+        
+        # --- 核心修改在这里 ---
+        # 1. 计算当前图像在哪个批次 (batch_idx) 和批次中的哪个位置 (idx_in_batch)
+        batch_idx = image_index // image_batch_size
+        idx_in_batch = image_index % image_batch_size
+
+        # 2. 从列表中先找到对应的批次张量，再从该张量中取出所需的图像特征
+        image_embedss = image_embedss_cache[batch_idx][:, idx_in_batch]
+        # --- 修改结束 ---
+
         text_embedss = text_embedss_cache[:, topk_idx_i]
         extend_text_masks = extend_text_masks_cache[topk_idx_i]
         if pl_module.hparams.config["image_chunks"] >= 2:
@@ -1069,7 +1181,7 @@ def compute_irtr_itm_itc_recall(pl_module, split):
 
     sims_matrix = unimodal_feats_image_cache @ unimodal_feats_text_cache.t()
     _, topk_idx = sims_matrix.topk(k=pl_module.hparams.config['k_test'], dim=0)
-    rank = torch.distributed.get_rank()
+    rank = torch.distributed.get_rank() if torch.distributed.is_initialized() else 0
     del unimodal_feats_image_cache, unimodal_feats_text_cache
     import gc
     gc.collect()
@@ -1077,104 +1189,113 @@ def compute_irtr_itm_itc_recall(pl_module, split):
     print("[Evaluation] gather all images")
     # if out of memory, then let's gather all the image input and rerun the vision part, but slower 4~5 times
 
-    if text_embedss_cache.size(1) % torch.distributed.get_world_size() == 0:
-        step = text_embedss_cache.size(1) // torch.distributed.get_world_size()
-    else:
-        step = text_embedss_cache.size(1) // torch.distributed.get_world_size() + 1
-    start = rank * step
-    end = min(text_embedss_cache.size(1), (rank + 1) * step)
-    text_embedss_cache = text_embedss_cache[:, start:end]
-    extend_text_masks_cache = extend_text_masks_cache[start:end]
-    # topk_idx = topk_idx[:, start:end]
+    # --- 核心修改：在这里为单卡模式预先定义 start 和 end ---
+    # 1. 为 start, end, rank 设置单卡模式下的默认值
+    start = 0
+    end = text_embedss_cache.size(1) # 在单卡模式下，处理全部的文本
+    rank = 0
 
-    if pl_module.hparams.config["gather_all_image_inputs"]:
-        if not pl_module.hparams.config["save_memory"]:
-            img_input_cache = pl_module.all_gather(img_input_cache).to(pl_module.device).view(-1, img_input_cache.size(1), img_input_cache.size(2), img_input_cache.size(3))
+    if torch.distributed.is_initialized():
+        rank = torch.distributed.get_rank() # 重新获取正确的rank
+        world_size = torch.distributed.get_world_size() if torch.distributed.is_initialized() else 1
+        if text_embedss_cache.size(1) % world_size == 0:
+            step = text_embedss_cache.size(1) // world_size
         else:
-            useful_num = topk_idx.tolist()
-            print(len(useful_num), len(useful_num[0]))
-            useful_num = [item for sublist in useful_num for item in sublist]
-            useful_num = set(useful_num)
-            print(len(useful_num))
-            all_idx_matrix = torch.zeros(sims_matrix.size(0)).long().to(pl_module.device)
-            for i in range(topk_idx.size(1)):
-                all_idx_matrix[topk_idx[:, i]] = 1
+            step = text_embedss_cache.size(1) // world_size + 1
+        start = rank * step
+        end = min(text_embedss_cache.size(1), (rank + 1) * step)
+        text_embedss_cache = text_embedss_cache[:, start:end]
+        extend_text_masks_cache = extend_text_masks_cache[start:end]
+        # topk_idx = topk_idx[:, start:end]
 
-            image_input_list, image_input_idx_list = [], []
-            current_image_num = sims_matrix.size(0) // dist.get_world_size()
-            for i in range(current_image_num):
-                j = i + current_image_num * rank
-                if all_idx_matrix[j] == 1:
-                    image_input_list.append(img_input_cache[i])
-                    image_input_idx_list.append(j)
-            image_input_list = torch.stack(image_input_list, dim=0)
-            image_input_idx_list = torch.LongTensor(image_input_idx_list)
-            img_input_cache = image_input_list
+        if pl_module.hparams.config["gather_all_image_inputs"]:
+            if not pl_module.hparams.config["save_memory"]:
+                img_input_cache = pl_module.all_gather(img_input_cache).to(pl_module.device).view(-1, img_input_cache.size(1), img_input_cache.size(2), img_input_cache.size(3))
+            else:
+                useful_num = topk_idx.tolist()
+                print(len(useful_num), len(useful_num[0]))
+                useful_num = [item for sublist in useful_num for item in sublist]
+                useful_num = set(useful_num)
+                print(len(useful_num))
+                all_idx_matrix = torch.zeros(sims_matrix.size(0)).long().to(pl_module.device)
+                for i in range(topk_idx.size(1)):
+                    all_idx_matrix[topk_idx[:, i]] = 1
 
-            gather_img_input_cache = [None for _ in range(dist.get_world_size())]
-            dist.all_gather_object(gather_img_input_cache, img_input_cache)
-            gather_img_input_cache = [i.to(pl_module.device) for i in gather_img_input_cache]
-            gather_img_input_cache = torch.cat(gather_img_input_cache, dim=0)
-            img_input_cache = gather_img_input_cache
-            
-            gather_image_input_idx_list = [None for _ in range(dist.get_world_size())]
-            dist.all_gather_object(gather_image_input_idx_list, image_input_idx_list)
-            gather_image_input_idx_list = [i.to(pl_module.device) for i in gather_image_input_idx_list]
-            gather_image_input_idx_list = torch.cat(gather_image_input_idx_list, dim=0)
-            image_input_idx_list = gather_image_input_idx_list
+                image_input_list, image_input_idx_list = [], []
+                current_image_num = sims_matrix.size(0) // dist.get_world_size()
+                for i in range(current_image_num):
+                    j = i + current_image_num * rank
+                    if all_idx_matrix[j] == 1:
+                        image_input_list.append(img_input_cache[i])
+                        image_input_idx_list.append(j)
+                image_input_list = torch.stack(image_input_list, dim=0)
+                image_input_idx_list = torch.LongTensor(image_input_idx_list)
+                img_input_cache = image_input_list
 
-            print(img_input_cache.shape, image_input_idx_list.shape)
-            
-            inverse_img_input_idx = torch.zeros(sims_matrix.size(0)).long().fill_(-1).to(pl_module.device)
-            for i in range(image_input_idx_list.size(0)):
-                inverse_img_input_idx[image_input_idx_list[i]] = i
+                gather_img_input_cache = [None for _ in range(dist.get_world_size())]
+                dist.all_gather_object(gather_img_input_cache, img_input_cache)
+                gather_img_input_cache = [i.to(pl_module.device) for i in gather_img_input_cache]
+                gather_img_input_cache = torch.cat(gather_img_input_cache, dim=0)
+                img_input_cache = gather_img_input_cache
+                
+                gather_image_input_idx_list = [None for _ in range(dist.get_world_size())]
+                dist.all_gather_object(gather_image_input_idx_list, image_input_idx_list)
+                gather_image_input_idx_list = [i.to(pl_module.device) for i in gather_image_input_idx_list]
+                gather_image_input_idx_list = torch.cat(gather_image_input_idx_list, dim=0)
+                image_input_idx_list = gather_image_input_idx_list
 
-    else:
-        if not pl_module.hparams.config["save_memory"]:
-            image_embedss_cache = pl_module.all_gather(image_embedss_cache.transpose(0, 1)).to(pl_module.device).view(-1, image_embedss_cache.size(0), image_embedss_cache.size(2), image_embedss_cache.size(3)).transpose(0, 1)
+                print(img_input_cache.shape, image_input_idx_list.shape)
+                
+                inverse_img_input_idx = torch.zeros(sims_matrix.size(0)).long().fill_(-1).to(pl_module.device)
+                for i in range(image_input_idx_list.size(0)):
+                    inverse_img_input_idx[image_input_idx_list[i]] = i
+
         else:
-            useful_num = topk_idx.tolist()
-            print(len(useful_num), len(useful_num[0]))
-            useful_num = [item for sublist in useful_num for item in sublist]
-            useful_num = set(useful_num)
-            print(len(useful_num))
+            if not pl_module.hparams.config["save_memory"]:
+                image_embedss_cache = pl_module.all_gather(image_embedss_cache.transpose(0, 1)).to(pl_module.device).view(-1, image_embedss_cache.size(0), image_embedss_cache.size(2), image_embedss_cache.size(3)).transpose(0, 1)
+            else:
+                useful_num = topk_idx.tolist()
+                print(len(useful_num), len(useful_num[0]))
+                useful_num = [item for sublist in useful_num for item in sublist]
+                useful_num = set(useful_num)
+                print(len(useful_num))
 
-            all_idx_matrix = torch.zeros(sims_matrix.size(0)).long().to(pl_module.device)
-            for i in range(topk_idx.size(1)):
-                all_idx_matrix[topk_idx[:, i]] = 1
-            # current_idx_matrix = torch.zeros(sims_matrix.size(0))
-            # for i in range(end-start):
-            #     current_idx_matrix[topk_idx[:, i]] = 1
-            image_embedss_cache = image_embedss_cache.transpose(0, 1)
-            image_embedss_list, image_embedss_idx_list = [], []
-            current_image_num = sims_matrix.size(0) // dist.get_world_size()
-            for i in range(current_image_num):
-                j = i + current_image_num * rank
-                if all_idx_matrix[j] == 1:
-                    image_embedss_list.append(image_embedss_cache[i])
-                    image_embedss_idx_list.append(j)
-            image_embedss_list = torch.stack(image_embedss_list, dim=0)
-            image_embedss_idx_list = torch.LongTensor(image_embedss_idx_list)
-            image_embedss_cache = image_embedss_list
+                all_idx_matrix = torch.zeros(sims_matrix.size(0)).long().to(pl_module.device)
+                for i in range(topk_idx.size(1)):
+                    all_idx_matrix[topk_idx[:, i]] = 1
+                # current_idx_matrix = torch.zeros(sims_matrix.size(0))
+                # for i in range(end-start):
+                #     current_idx_matrix[topk_idx[:, i]] = 1
+                image_embedss_cache = image_embedss_cache.transpose(0, 1)
+                image_embedss_list, image_embedss_idx_list = [], []
+                current_image_num = sims_matrix.size(0) // dist.get_world_size()
+                for i in range(current_image_num):
+                    j = i + current_image_num * rank
+                    if all_idx_matrix[j] == 1:
+                        image_embedss_list.append(image_embedss_cache[i])
+                        image_embedss_idx_list.append(j)
+                image_embedss_list = torch.stack(image_embedss_list, dim=0)
+                image_embedss_idx_list = torch.LongTensor(image_embedss_idx_list)
+                image_embedss_cache = image_embedss_list
 
-            gather_image_embedss_cache = [None for _ in range(dist.get_world_size())]
-            dist.all_gather_object(gather_image_embedss_cache, image_embedss_cache)
-            gather_image_embedss_cache = [i.to(pl_module.device) for i in gather_image_embedss_cache]
-            gather_image_embedss_cache = torch.cat(gather_image_embedss_cache, dim=0)
-            image_embedss_cache = gather_image_embedss_cache
-            
-            gather_image_embedss_idx_list = [None for _ in range(dist.get_world_size())]
-            dist.all_gather_object(gather_image_embedss_idx_list, image_embedss_idx_list)
-            gather_image_embedss_idx_list = [i.to(pl_module.device) for i in gather_image_embedss_idx_list]
-            gather_image_embedss_idx_list = torch.cat(gather_image_embedss_idx_list, dim=0)
-            image_embedss_idx_list = gather_image_embedss_idx_list
+                gather_image_embedss_cache = [None for _ in range(dist.get_world_size())]
+                dist.all_gather_object(gather_image_embedss_cache, image_embedss_cache)
+                gather_image_embedss_cache = [i.to(pl_module.device) for i in gather_image_embedss_cache]
+                gather_image_embedss_cache = torch.cat(gather_image_embedss_cache, dim=0)
+                image_embedss_cache = gather_image_embedss_cache
+                
+                gather_image_embedss_idx_list = [None for _ in range(dist.get_world_size())]
+                dist.all_gather_object(gather_image_embedss_idx_list, image_embedss_idx_list)
+                gather_image_embedss_idx_list = [i.to(pl_module.device) for i in gather_image_embedss_idx_list]
+                gather_image_embedss_idx_list = torch.cat(gather_image_embedss_idx_list, dim=0)
+                image_embedss_idx_list = gather_image_embedss_idx_list
 
-            print(image_embedss_cache.shape, image_embedss_idx_list.shape)
-            image_embedss_cache = image_embedss_cache.transpose(0, 1)
-            
-            inverse_image_embedss_idx = torch.zeros(sims_matrix.size(0)).long().fill_(-1).to(pl_module.device)
-            for i in range(image_embedss_idx_list.size(0)):
-                inverse_image_embedss_idx[image_embedss_idx_list[i]] = i
+                print(image_embedss_cache.shape, image_embedss_idx_list.shape)
+                image_embedss_cache = image_embedss_cache.transpose(0, 1)
+                
+                inverse_image_embedss_idx = torch.zeros(sims_matrix.size(0)).long().fill_(-1).to(pl_module.device)
+                for i in range(image_embedss_idx_list.size(0)):
+                    inverse_image_embedss_idx[image_embedss_idx_list[i]] = i
 
     topk_idx = topk_idx[:, start:end]
 
@@ -1195,7 +1316,25 @@ def compute_irtr_itm_itc_recall(pl_module, split):
             if pl_module.hparams.config["save_memory"]:
                 image_embedss = image_embedss_cache[:, inverse_image_embedss_idx[topk_idx_i]]
             else:
-                image_embedss = image_embedss_cache[:, topk_idx_i]
+                # image_embedss = image_embedss_cache[:, topk_idx_i]
+
+                # 1. 创建一个空列表，用于存放本次循环需要的图像特征
+                image_embeds_for_this_text = []
+                
+                # 2. 遍历当前文本的所有候选图像索引
+                for image_global_index in topk_idx_i:
+                    # 3. 计算每个图像在列表中的批次位置(batch_idx)和批内位置(idx_in_batch)
+                    batch_idx = torch.div(image_global_index, image_batch_size, rounding_mode='floor')
+                    idx_in_batch = image_global_index % image_batch_size
+                    
+                    # 4. 从列表中安全地取出单个图像的特征
+                    single_image_embed = image_embedss_cache[batch_idx][:, idx_in_batch]
+                    image_embeds_for_this_text.append(single_image_embed)
+                    
+                # 5. 将本次循环找到的所有图像特征拼接成一个张量，以供后续使用
+                image_embedss = torch.stack(image_embeds_for_this_text, dim=1)
+                # --- 修改结束 ---
+
         text_embedss = text_embedss_cache[:, text_index]
         extend_text_masks = extend_text_masks_cache[text_index].unsqueeze_(0).expand(image_embedss.size(1), extend_text_masks_cache.size(1), extend_text_masks_cache.size(2), extend_text_masks_cache.size(3))
         if pl_module.hparams.config["image_chunks"] >= 2:
@@ -1305,7 +1444,14 @@ def compute_irtr_itm_itc_recall_meter(pl_module, split):
     torch.cuda.empty_cache()
     text_dset = pl_module.trainer.datamodule.dms[0].make_no_false_dset(split)
     text_dset.tokenizer = pl_module.trainer.datamodule.dms[0].tokenizer
-    text_dist_sampler = DistributedSampler(text_dset, shuffle=False)
+    # text_dist_sampler = DistributedSampler(text_dset, shuffle=False)
+
+    text_dist_sampler = None
+    if torch.distributed.is_initialized():
+        text_dist_sampler = DistributedSampler(text_dset, shuffle=False)
+    else:
+        text_dist_sampler = torch.utils.data.SequentialSampler(text_dset)
+
     text_loader = torch.utils.data.DataLoader(
         text_dset,
         batch_size=pl_module.hparams.config["per_gpu_eval_batchsize_text"],
@@ -1322,7 +1468,14 @@ def compute_irtr_itm_itc_recall_meter(pl_module, split):
     print("[Evaluation] load irtr dataset for image features caching")
     image_dset = pl_module.trainer.datamodule.dms[0].make_no_false_dset(split, image_only=True)
     image_dset.tokenizer = pl_module.trainer.datamodule.dms[0].tokenizer
-    image_dist_sampler = DistributedSampler(image_dset, shuffle=False)
+    # image_dist_sampler = DistributedSampler(image_dset, shuffle=False)
+
+    image_dist_sampler = None
+    if torch.distributed.is_initialized():
+        image_dist_sampler = DistributedSampler(image_dset, shuffle=False)
+    else:
+        image_dist_sampler = torch.utils.data.SequentialSampler(image_dset)
+    
     image_loader = torch.utils.data.DataLoader(
         image_dset,
         batch_size=pl_module.hparams.config["per_gpu_eval_batchsize_image"],
@@ -1493,7 +1646,7 @@ def compute_irtr_itm_itc_recall_meter(pl_module, split):
 
     sims_matrix = unimodal_feats_image_cache @ unimodal_feats_text_cache.t()
     _, topk_idx = sims_matrix.topk(k=pl_module.hparams.config['k_test'], dim=0)
-    rank = torch.distributed.get_rank()
+    rank = torch.distributed.get_rank() if torch.distributed.is_initialized() else 0
     del unimodal_feats_image_cache, unimodal_feats_text_cache
     import gc
     gc.collect()
@@ -1637,7 +1790,14 @@ def compute_irtr_itc_recall(pl_module, split):
     torch.cuda.empty_cache()
     text_dset = pl_module.trainer.datamodule.dms[0].make_no_false_dset(split)
     text_dset.tokenizer = pl_module.trainer.datamodule.dms[0].tokenizer
-    text_dist_sampler = DistributedSampler(text_dset, shuffle=False)
+    # text_dist_sampler = DistributedSampler(text_dset, shuffle=False)
+
+    text_dist_sampler = None
+    if torch.distributed.is_initialized():
+        text_dist_sampler = DistributedSampler(text_dset, shuffle=False)
+    else:
+        text_dist_sampler = torch.utils.data.SequentialSampler(text_dset)
+
     text_loader = torch.utils.data.DataLoader(
         text_dset,
         batch_size=pl_module.hparams.config["per_gpu_eval_batchsize_text"],
@@ -1654,7 +1814,14 @@ def compute_irtr_itc_recall(pl_module, split):
     print("[Evaluation] load irtr dataset for image features caching")
     image_dset = pl_module.trainer.datamodule.dms[0].make_no_false_dset(split, image_only=True)
     image_dset.tokenizer = pl_module.trainer.datamodule.dms[0].tokenizer
-    image_dist_sampler = DistributedSampler(image_dset, shuffle=False)
+    # image_dist_sampler = DistributedSampler(image_dset, shuffle=False)
+
+    image_dist_sampler = None
+    if torch.distributed.is_initialized():
+        image_dist_sampler = DistributedSampler(image_dset, shuffle=False)
+    else:
+        image_dist_sampler = torch.utils.data.SequentialSampler(image_dset)
+
     image_loader = torch.utils.data.DataLoader(
         image_dset,
         batch_size=pl_module.hparams.config["per_gpu_eval_batchsize_image"],
@@ -1790,8 +1957,44 @@ def vqa_test_step(pl_module, batch, output):
     qids = batch["qid"]
     return {"qids": qids, "preds": vqa_preds, "gqa": False}
 
+# def vqa_test_wrapup(outs, model_name, log_dir):
+#     rank = torch.distributed.get_rank() if torch.distributed.is_initialized() else 0
+#     qids, preds = list(), list()
+#     gqa = False
+#     for out in outs:
+#         qids += out["qids"]
+#         preds += out["preds"]
+#         gqa = out['gqa']
+
+#     rets = list()
+#     for qid, pred in zip(qids, preds):
+#         if gqa:
+#             rets.append({"questionId": qid, "prediction": pred})
+#         else:
+#             rets.append({"question_id": qid, "answer": pred})
+
+#     if torch.distributed.is_initialized():
+#         torch.distributed.barrier()   
+    
+#     print(f'rank: {rank}, world_size: {dist.get_world_size()}, length of rets: {len(rets)}')
+#     gather_rets = [None for _ in range(dist.get_world_size())]
+#     dist.all_gather_object(gather_rets, rets)
+#     print(f'rank: {rank}, length of gather_rets: {len(gather_rets)}')
+#     print(f'rank: {rank}, length of gather_rets[0]: {len(gather_rets[0])}')
+    
+#     if rank == 0:
+#         jsons = list()
+#         for rets_ in gather_rets:
+#             jsons += rets_
+#         with open(f"{log_dir}/vqa_submit_{model_name}.json", "w") as fp:
+#             json.dump(jsons, fp, indent=4)
+    
+#     if torch.distributed.is_initialized():
+#         torch.distributed.barrier()
+
+# 请将此函数完整复制，替换掉 objectives.py 中旧的 vqa_test_wrapup
 def vqa_test_wrapup(outs, model_name, log_dir):
-    rank = torch.distributed.get_rank()
+    # 步骤1：这部分逻辑是通用的，先把所有批次的结果(outs)整理成一个大列表(rets)
     qids, preds = list(), list()
     gqa = False
     for out in outs:
@@ -1806,21 +2009,45 @@ def vqa_test_wrapup(outs, model_name, log_dir):
         else:
             rets.append({"question_id": qid, "answer": pred})
 
+    # 步骤2：核心修改！用 if/else 分离两种模式的处理流程
     if torch.distributed.is_initialized():
-        torch.distributed.barrier()   
-    
-    print(f'rank: {rank}, world_size: {dist.get_world_size()}, length of rets: {len(rets)}')
-    gather_rets = [None for _ in range(dist.get_world_size())]
-    dist.all_gather_object(gather_rets, rets)
-    print(f'rank: {rank}, length of gather_rets: {len(gather_rets)}')
-    print(f'rank: {rank}, length of gather_rets[0]: {len(gather_rets[0])}')
-    
-    if rank == 0:
-        jsons = list()
-        for rets_ in gather_rets:
-            jsons += rets_
-        with open(f"{log_dir}/vqa_submit_{model_name}.json", "w") as fp:
-            json.dump(jsons, fp, indent=4)
-    
-    if torch.distributed.is_initialized():
+        # --- 情况A: 分布式模式 (Multi-GPU) ---
+        # 等待所有GPU都完成前面的计算
         torch.distributed.barrier()
+
+        # 安全地获取rank和world_size
+        rank = torch.distributed.get_rank()
+        world_size = torch.distributed.get_world_size()
+        print(f'GPU {rank}/{world_size}: Has {len(rets)} local results.')
+
+        # 创建一个列表，用于收集所有GPU的结果
+        gather_rets = [None for _ in range(world_size)]
+        
+        # 从所有GPU收集各自的rets列表，汇总到gather_rets里
+        torch.distributed.all_gather_object(gather_rets, rets)
+        
+        # 只让主进程（rank 0）进行汇总和文件写入，避免重复操作
+        if rank == 0:
+            print(f'GPU {rank}: Gathering all results to write to file...')
+            final_results = list()
+            for rets_from_one_gpu in gather_rets:
+                final_results.extend(rets_from_one_gpu)
+            
+            # 写入JSON文件
+            filepath = f"{log_dir}/vqa_submit_{model_name}.json"
+            with open(filepath, "w") as fp:
+                json.dump(final_results, fp, indent=4)
+            print(f"Results saved to {filepath}")
+        
+        # 再次同步，确保 rank 0 完成写入后再继续
+        torch.distributed.barrier()
+
+    else:
+        # --- 情况B: 单卡/非分布式模式 ---
+        print("Running in non-distributed mode. Writing results directly.")
+        
+        # 在单卡模式下，`rets` 变量本身就包含了全部结果，直接写入即可
+        filepath = f"{log_dir}/vqa_submit_{model_name}.json"
+        with open(filepath, "w") as fp:
+            json.dump(rets, fp, indent=4)
+        print(f"Results saved to {filepath}")

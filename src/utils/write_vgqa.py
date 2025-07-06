@@ -176,5 +176,5 @@ def make_arrow(root, vg_root, dataset_root, use_coco_images_only=False):
             with pa.RecordBatchFileWriter(sink, table.schema) as writer:
                 writer.write_table(table)
 
-make_arrow('~/MT/dataset/mscoco_flickr30k_vqav2_snli_ve', '~/MT/dataset/vg', '~/MT/dataset/fine-tune', True)
-make_arrow('~/MT/dataset/mscoco_flickr30k_vqav2_snli_ve', '~/MT/dataset/vg', '~/MT/dataset/fine-tune', False)
+make_arrow(f'{os.getenv("HOME")}/MT/dataset/mscoco_flickr30k_vqav2_snli_ve', f'{os.getenv("HOME")}/MT/dataset/vg', f'{os.getenv("HOME")}/MT/dataset/fine-tune', True)
+make_arrow(f'{os.getenv("HOME")}/MT/dataset/mscoco_flickr30k_vqav2_snli_ve', f'{os.getenv("HOME")}/MT/dataset/vg', f'{os.getenv("HOME")}/MT/dataset/fine-tune', False)
